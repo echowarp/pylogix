@@ -28,6 +28,26 @@ import time
 programNames = []
 taglist = []
 
+
+CIPTypes = { 112:(0, "TASK", ''),
+             104:(0, "PROGM", ''),
+             255:(0, "MSG", ''),
+             131:(0, "TIMER", ''),
+             160:(88 ,"STRUCT", 'B'),
+             193:(1, "BOOL", '?'),
+             194:(1, "SINT", 'b'),
+             195:(2, "INT", 'h'),
+             196:(4, "DINT", 'i'),
+             197:(8, "LINT", 'q'),
+             198:(1, "USINT", 'B'),
+             199:(2, "UINT", 'H'),
+             200:(4, "UDINT", 'I'),
+             201:(8, "LWORD", 'Q'),
+             202:(4, "REAL", 'f'),
+             203:(8, "LREAL", 'd'),
+             211:(4, "DWORD", 'I'),
+             218:(0, "STRING", 'B')}
+
 class PLC:
 
     def __init__(self):
@@ -52,20 +72,7 @@ class PLC:
         self.Offset = 0
         self.KnownTags = {}
         self.StructIdentifier = 0x0fCE
-        self.CIPTypes = {160:(88 ,"STRUCT", 'B'),
-                         193:(1, "BOOL", '?'),
-                         194:(1, "SINT", 'b'),
-                         195:(2, "INT", 'h'),
-                         196:(4, "DINT", 'i'),
-                         197:(8, "LINT", 'q'),
-                         198:(1, "USINT", 'B'),
-                         199:(2, "UINT", 'H'),
-                         200:(4, "UDINT", 'I'),
-                         201:(8, "LWORD", 'Q'),
-                         202:(4, "REAL", 'f'),
-                         203:(8, "LREAL", 'd'),
-                         211:(4, "DWORD", 'I'),
-                         218:(0, "STRING", 'B')}
+        self.CIPTypes = CIPTypes
 
     def __enter__(self):
         return self
@@ -250,13 +257,13 @@ def _multiRead(self, args):
     Processes the multiple read request
     '''
     serviceSegments = []
-    segments = ""
+    segments = bytearray()
     tagCount = len(args)
     self.Offset = 0
 
     if not _connect(self): return None
 
-    for i in xrange(tagCount):
+    for i in range(tagCount):
         tag,base,ind = TagNameParser(args[i], 0)
         InitialRead(self, tag, base)
     
@@ -277,10 +284,10 @@ def _multiRead(self, args):
     offsets = pack('<H', temp)
 
     # assemble all the segments
-    for i in xrange(tagCount):
+    for i in range(tagCount):
         segments += serviceSegments[i]
 
-    for i in xrange(tagCount-1):	
+    for i in range(tagCount-1):	
         temp += len(serviceSegments[i])
         offsets += pack('<H', temp)
 
@@ -353,7 +360,7 @@ def _setPLCTime(self):
     AttributeInstance = 0x01
     AttributeCount = 0x01
     Attribute = 0x06
-    Time = time.time() * 1000000
+    Time = int(time.time() * 1000000)
     AttributePacket = pack('<BBBBBBHHQ',
                            AttributeService,
                            AttributeSize,
@@ -401,13 +408,14 @@ def _getTagList(self):
         retData = _getBytes(self, eipHeader)
         extractTagPacket(self, retData, programName=None)
         status = unpack_from('<B', retData, 48)[0]
-        time.sleep(0.25)
 
     '''
     When we're done with the controller scoped tags,
     request the program scoped tags
     '''
     for programName in programNames:
+
+        programName = programName
 
         self.Offset = 0
         
@@ -424,8 +432,7 @@ def _getTagList(self):
             retData = _getBytes(self, eipHeader)
             extractTagPacket(self, retData, programName)
             status = unpack_from('<B', retData, 48)[0]
-            time.sleep(0.25)
-    
+
     return taglist
     
 def _discover():
@@ -485,13 +492,14 @@ def _connect(self):
         return True
     
     try:
-        self.Socket = socket.socket()
-        self.Socket.settimeout(5.0)
+        self.Socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.Socket.settimeout(20.0)
         self.Socket.connect((self.IPAddress, self.Port))
     except:
         self.SocketConnected = False
         self.SequenceCounter = 1
         self.Socket.close()
+        print("Failed to connect to {}:{}".format(self.IPAddress, self.Port))
         return False
 
     retData = _getBytes(self, _buildRegisterSession(self))
@@ -499,7 +507,7 @@ def _connect(self):
         self.SessionHandle = unpack_from('<I', retData, 4)[0]
     else:
         self.SocketConnected = False
-        print "Failed to register session"
+        print("Failed to register session")
         return False
 
     retData = _getBytes(self, _buildForwardOpenPacket(self))
@@ -508,7 +516,7 @@ def _connect(self):
         self.SocketConnected = True
     else:
         self.SocketConnected = False
-        print "Forward Open Failed"
+        print("Forward Open Failed")
         return False
     
     return True
@@ -537,10 +545,10 @@ def _getBytes(self, data):
             return retData
         else:
             return None
-    except socket.gaierror, e:
+    except socket.gaierror as e:
         self.SocketConnected = False
         return None
-    except IOError, e:
+    except IOError as e:
         self.SocketConnected = False
         return None
         
@@ -655,12 +663,12 @@ def _buildCIPForwardOpen(self):
         ConnectionPath = [0x20, 0x02, 0x24, 0x01]
     else:
         ConnectionPath = [0x01, self.ProcessorSlot, 0x20, 0x02, 0x24, 0x01]
+
+    ConnectionPathSize = int(len(ConnectionPath)/2)
+    ConnectionPath.insert(0,ConnectionPathSize)
+    ConnectionPath = bytes(ConnectionPath)
     
-    ConnectionPathSize = len(ConnectionPath)/2
-    pack_format = '<B' + str(len(ConnectionPath)) + 'B'
-    CIPConnectionPath = pack(pack_format, ConnectionPathSize, *ConnectionPath)
-    
-    return ForwardOpen + CIPConnectionPath
+    return ForwardOpen + ConnectionPath
 
 def _buildForwardClose(self):
     '''
@@ -699,10 +707,10 @@ def _buildForwardClose(self):
         ConnectionPath = [0x01, self.ProcessorSlot, 0x20, 0x02, 0x24, 0x01]
     
     ConnectionPathSize = len(ConnectionPath)/2
-    pack_format = '<H' + str(len(ConnectionPath)) + 'B'
-    CIPConnectionPath = pack(pack_format, ConnectionPathSize, *ConnectionPath)
+    ConnectionPath.insert(0,ConnectionPathSize)
+    ConnectionPath = bytes(ConnectionPath)
         
-    return ForwardClose + CIPConnectionPath 
+    return ForwardClose + ConnectionPath 
   
 def _buildEIPSendRRDataHeader(self, frameLen):
     EIPCommand = 0x6F                               #(H)EIP SendRRData  (Vol2 2-4.7)
@@ -750,11 +758,11 @@ def _buildTagIOI(self, tagName, isBoolArray):
     We also might be reading arrays, a bool from arrays (atomic), strings.
         Oh and multi-dim arrays, program scope tags...
     '''
-    RequestTagData = ""		# define tag data
+    RequestTagData = bytearray()		# define tag data
     tagArray = tagName.split(".")
 
     # this loop figures out the packet length and builds our packet
-    for i in xrange(len(tagArray)):
+    for i in range(len(tagArray)):
         if tagArray[i].endswith("]"):
             tag, basetag, index = TagNameParser(tagArray[i], 0)
             
@@ -763,7 +771,7 @@ def _buildTagIOI(self, tagName, isBoolArray):
 
             # Assemble the packet
             RequestTagData += pack('<BB', 0x91, BaseTagLenBytes)   # add the req type and tag len to packet
-            RequestTagData += basetag                              # add the tag name
+            RequestTagData += bytes(basetag, 'ascii')              # add the tag name
             if BaseTagLenBytes%2:                                  # check for odd bytes
                 BaseTagLenBytes += 1                               # add another byte to make it even
                 RequestTagData += pack('<B', 0x00)                 # add the byte to our packet
@@ -779,7 +787,7 @@ def _buildTagIOI(self, tagName, isBoolArray):
                     if index > 65535:
                         RequestTagData += pack('<HI', 0x2A, index)
                 else:
-                    for i in xrange(len(index)):
+                    for i in range(len(index)):
                         if index[i] < 256:                                  # if index is 1 byte...
                             RequestTagData += pack('<BB', 0x28, index[i])   # add one word to packet
                         if 65536 > index[i] > 255:                          # if index is more than 1 byte...
@@ -801,8 +809,8 @@ def _buildTagIOI(self, tagName, isBoolArray):
             except:
                 BaseTagLenBytes = len(tagArray[i])                      # store len of tag
                 RequestTagData += pack('<BB', 0x91, len(tagArray[i]))   # add to packet
-                RequestTagData += tagArray[i]                           # add tag req type and len to packet
-                if BaseTagLenBytes%2:                                   # if odd number of bytes
+                RequestTagData += bytes(tagArray[i], 'ascii')           # add tag req type and len to packet
+                if BaseTagLenBytes % 2:                                 # if odd number of bytes
                     BaseTagLenBytes += 1                                # add byte to make it even
                     RequestTagData += pack('<B', 0x00)                  # also add to packet  
 
@@ -813,7 +821,7 @@ def _addReadIOI(self, tagIOI, elements):
     Add the read service to the tagIOI
     '''
     RequestService = 0x4C                                   # CIP Read_TAG_Service (PM020 Page 17)
-    RequestPathSize = len(tagIOI)/2
+    RequestPathSize = int(len(tagIOI)/2)
     readIOI = pack('<BB', RequestService, RequestPathSize)  # beginning of our req packet
     readIOI += tagIOI                                       # add tagIOI to readIOI
     readIOI += pack('<H', elements)                         # end of packet
@@ -824,7 +832,7 @@ def _addPartialReadIOI(self, tagIOI, elements):
     Add the partial read service to the tag IOI
     '''
     RequestService=0x52
-    RequestPathSize=len(tagIOI)/2
+    RequestPathSize= int(len(tagIOI)/2)
     readIOI = pack('<BB', RequestService, RequestPathSize)  # beginning of our req packet
     readIOI += tagIOI                                       # Tag portion of packet
     readIOI += pack('<H', elements)                         # end of packet
@@ -840,8 +848,8 @@ def _addWriteIOI(self, tagIOI, writeData, dataType):
     dataLen = len(writeData)                        # list of elements to write
     NumberOfBytes = elementSize*dataLen
     RequestNumberOfElements = dataLen
-    RequestPathSize = len(tagIOI)/2
-    RequestService = 0x4D
+    RequestPathSize = int(len(tagIOI)/2)
+    RequestService = int(0x4D)
     CIPWriteRequest = pack('<BB', RequestService, RequestPathSize)
     CIPWriteRequest += tagIOI
 
@@ -855,8 +863,7 @@ def _addWriteIOI(self, tagIOI, writeData, dataType):
 
     for v in writeData:
         try:
-            for i in xrange(len(v)):
-                el = v[i]
+            for el in v:
                 CIPWriteRequest += pack(self.CIPTypes[dataType][2],el)
         except:
             CIPWriteRequest += pack(self.CIPTypes[dataType][2],v)
@@ -974,11 +981,11 @@ def _buildTagListRequest(self, programName):
     Program scoped tags will pass the program name for the request
     '''
     Service = 0x55
-    PathSegment = ""
+    PathSegment = bytearray()
     
     #If we're dealing with program scoped tags...
     if programName:
-        PathSegment = pack('<BB', 0x91, len(programName)) + programName
+        PathSegment = pack('<BB', 0x91, len(programName)) + programName.encode()
         # if odd number of characters, need to add a byte to the end.
         if len(programName) % 2: PathSegment += pack('<B', 0x00)
   
@@ -989,7 +996,7 @@ def _buildTagListRequest(self, programName):
     else:
         PathSegment += pack('<HH', 0x25, self.Offset)
         
-    PathSegmentLen = len(PathSegment) / 2
+    PathSegmentLen = int(len(PathSegment) / 2)
     AttributeCount = 0x03
     SymbolType = 0x02
     ByteCount = 0x07
@@ -1196,7 +1203,7 @@ def TagNameParser(tag, offset):
             else:
                 # if we have a multi dim array, return the index
                 ind = []
-                for i in xrange(len(s)):
+                for i in range(len(s)):
                     s[i] = int(s[i])
                     ind.append(s[i])
         else:
@@ -1215,7 +1222,7 @@ def MultiParser(self, tags, data):
     
     # get the offset values for each of the tags in the packet
     reply = []
-    for i in xrange(tagCount):
+    for i in range(tagCount):
         loc = 2+(i*2)
         offset = unpack_from('<H', stripped, loc)[0]
         replyStatus = unpack_from('<b', stripped, offset+2)[0]
@@ -1257,7 +1264,7 @@ def MakeString(self, string):
     for char in string:
         work.append(ord(char))
     if not self.Micro800:
-        for x in xrange(len(string), 84):
+        for x in range(len(string), 84):
             work.append(0x00)
     return work
 
@@ -1333,7 +1340,7 @@ def _parseIdentityResponse(data):
     resp.Status = unpack_from('<H', data, 56)[0]
     resp.SerialNumber = hex(unpack_from('<I', data, 58)[0])
     resp.ProductNameLength = unpack_from('<B', data, 62)[0]
-    resp.ProductName = data[63:63+resp.ProductNameLength]
+    resp.ProductName = data[63:63+resp.ProductNameLength].decode("utf-8")
 
     state = data[-1:]
     resp.State = unpack_from('<B', state, 0)[0]
@@ -1365,12 +1372,19 @@ def extractTagPacket(self, data, programName):
 def parseLgxTag(packet, programName):
     tag = LGXTag()
     length = unpack_from('<H', packet, 8)[0]
+
     if programName:
-        tag.TagName = programName + '.' + packet[10:length+10]
+        tag.TagName = programName + '.' + packet[10:length+10].decode("ascii")
     else:
-        tag.TagName = packet[10:length+10]
+        tag.TagName = packet[10:length+10].decode("ascii")
+
     tag.Offset = unpack_from('<H', packet, 0)[0]
     tag.DataType = unpack_from('<B', packet, 4)[0]
+
+    if tag.DataType in CIPTypes:
+        tag.DataTypeStr = CIPTypes[tag.DataType][1]
+    else:
+        tag.DataTypeStr = ""
 
     return tag
 
